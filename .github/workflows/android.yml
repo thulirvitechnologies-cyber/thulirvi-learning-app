@@ -1,3 +1,4 @@
+
 name: Build Thulirvi Learn APK
 
 on:
@@ -7,9 +8,13 @@ on:
       - "thulirvi-learn-android-repaired.zip"
       - ".github/workflows/android.yml"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -21,21 +26,54 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Extract Android project
-        run: |
-          unzip -o thulirvi-learn-android-repaired.zip -d extracted
-          ls -la extracted
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Build release APK
+      - name: Extract Android project
+        shell: bash
         run: |
-          cd extracted/thulirvi-learn-android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          set -euo pipefail
+          mkdir -p extracted
+          unzip -o thulirvi-learn-android-repaired.zip -d extracted
+          echo "Files extracted:"
+          find extracted -maxdepth 4 -type f | head -100
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLEW="$(find extracted -type f -name gradlew -print -quit)"
+          if [ -z "$GRADLEW" ]; then
+            echo "ERROR: No gradlew file found in the ZIP."
+            echo "The ZIP may not contain a complete Android project."
+            exit 1
+          fi
+          PROJECT_DIR="$(dirname "$GRADLEW")"
+          echo "Project directory: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          chmod +x "$GRADLEW"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          timeout 20m ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$PROJECT_DIR/app/build/outputs/apk" \
+            -type f -name '*.apk' -print
+          test -n "$(find "$PROJECT_DIR/app/build/outputs/apk" \
+            -type f -name '*.apk' -print -quit)"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: thulirvi-learn-apk
-          path: extracted/thulirvi-learn-android/app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+          retention-days: 7
           
